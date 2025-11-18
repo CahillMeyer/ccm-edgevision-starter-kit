@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Camera Test (MSVC)",
+      "type": "shell",
+      "command": "cmd.exe",
+      "args": [
+        "/c",
+        "if not exist build mkdir build && cl src\\test_camera_windows.cpp /Fo:build\\test_camera_windows.obj /I C:\\opencv\\build\\include /Fe:build\\test_camera_msvc.exe /link /LIBPATH:C:\\opencv\\build\\x64\\vc16\\lib opencv_world4120.lib"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Camera Test (g++)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "mkdir -p build && g++ src/test_camera_windows.cpp -o build/test_camera_gpp -std=c++11 `pkg-config --cflags --libs opencv4`"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "problemMatcher": []
+    }
+  ]
+}
