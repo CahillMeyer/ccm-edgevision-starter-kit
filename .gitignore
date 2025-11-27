@@ -48,3 +48,5 @@ models/*
 
 # ...Except the placeholder file (so the folder structure persists)
 !models/.gitkeep
+.venv/
+venv/
