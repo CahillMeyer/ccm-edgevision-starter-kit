@@ -1,20 +1,80 @@
 %YAML:1.0
 ---
-# CCM EdgeVision Configuration
+# ==============================================================================
+# CCM EdgeVision Configuration File
+# Default Path: configs/zones.yaml
+#
+# Usage: 
+#   ./build/ccm_edgevision                        (Loads this file by default)
+#   ./build/ccm_edgevision --config my_custom.yaml (Loads custom settings)
+# ==============================================================================
+
+# --- AI Model Settings ---
+# Path to your ONNX model file.
+# NOTE: Ensure this model has static input shapes (e.g. 1x3x640x640).
 model_path: "models/yolov5s.onnx"
 class_names: "models/coco.names"
-confidence_threshold: 0.5
+
+# Detection Sensitivity
+# - confidence_threshold: Minimum probability (0.0 - 1.0) to accept a detection.
+#   * If using pixel_scale 1.0 (0-255), values might saturate close to 1.0. 
+#   * If using pixel_scale 0.0039 (0-1), values are standard probabilities.
+confidence_threshold: 0.25  
+
+# - nms_threshold: Overlap threshold (0.0 - 1.0) for removing duplicate boxes.
+#   Higher = more overlapping boxes allowed. Lower = strict de-duplication.
 nms_threshold: 0.4
 
-# Camera Hardware Settings
+# --- Camera Hardware Settings ---
 camera:
-   index: 0
-   width: 640
-   height: 480
-   fps: 30
-   force_mjpg: true  # Set 'true' for WSL, 'false' for native Linux/Jetson
+   index: 0          # Device ID (0 = /dev/video0, 1 = /dev/video1)
+   width: 640        # Capture Resolution Width
+   height: 480       # Capture Resolution Height
+   fps: 30           # Target Framerate
+   force_mjpg: 1     # Set 1 if using WSL or if camera lags (forces compressed stream)
 
-# Customization: Detection Zones
-zones:
+model:
+  input_width: 640
+  input_height: 640
+
+# --- Model Preprocessing Parameters ---
+# CRITICAL: These values must match how your model was trained.
+model_parameters:
+   input_width: 640
+   input_height: 640
+   
+   # Pixel Normalization Scale
+   # Option A: 0.00392156 (1/255) -> Normalizes pixels to [0.0 - 1.0]. 
+   #           Standard for most PyTorch/YOLOv5/v8 models.
+   # Option B: 1.0                -> Passes raw pixels [0 - 255]. 
+   #           Use this if the model has a built-in normalization layer.
+   #
+   # TROUBLESHOOTING:
+   # - If you see NO detections: Try 0.00392 first. If still nothing, lower 'confidence_threshold' to 0.10.
+   # - If you see "Ghosts" (high confidence on empty space): Your scale is likely wrong (try swapping between A and B).
+   pixel_scale: 0.00392156
+   
+   # Color Channel Swap
+   # - true:  Convert OpenCV BGR -> Model RGB (Standard for YOLO).
+   # - false: Keep BGR. Use if model was trained on BGR images.
+   # Incorrect setting here usually causes poor accuracy (e.g. confusing a person for a chair).
+   swap_rb: 1
+
+# --- Customization: Detection Zones ---
+# Define areas of interest for logic/alerts.
+zones: 
    - { name: "Danger Zone", rect: [100, 100, 400, 300], color: [0, 0, 255], trigger_class: "person" }
-   - { name: "Counting Line", rect: [0, 400, 640, 50], color: [0, 255, 0], trigger_class: "box" }
+#   - { name: "Counting Line", rect: [0, 400, 640, 50], color: [0, 255, 0], trigger_class: "box" }
+
+# Restriction Setting
+# List of zone names to restrict detection to. 
+# Only objects inside THESE zones will be detected. 
+# Leave the list empty [] to search the whole screen.
+active_search_zones: [  ] 
+# Example of multiple: [ "Danger Zone", "Counting Line" ]
+
+# --- Debugging Control ---
+debug:
+   enabled: 1             # Master switch for console logs (set 'false' for production)
+   threshold: 0.25        # Verbosity level: Log any object seen with confidence > X,
+                          # even if it is below the main 'confidence_threshold'.

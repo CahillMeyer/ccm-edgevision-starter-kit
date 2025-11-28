@@ -1,7 +1,7 @@
 #include <iostream>
 #include <fstream>
-#include <csignal>  // <--- Required for Signal Handling
-#include <atomic>   // <--- Required for thread-safe flags
+#include <csignal>
+#include <atomic>
 #include <opencv2/opencv.hpp>
 #include "config.hpp"
 #include "detector.hpp"
@@ -11,7 +11,19 @@
 // Global flag for the main loop
 std::atomic<bool> g_running(true);
 
-// Signal Handler: Catches Ctrl+C (SIGINT)
+std::string getAbsolutePath(const std::string& path) {
+#ifdef _WIN32
+    char buffer[_MAX_PATH];
+    if (_fullpath(buffer, path.c_str(), _MAX_PATH) != NULL) {
+        return std::string(buffer);
+    }
+#else
+    return realpath(path.c_str(), NULL);
+#endif
+    // If resolution fails, return the original
+    return path;
+}
+
 void signal_handler(int signum) {
     (void)signum;
     std::cout << "\n[System] Interrupt signal received. Shutting down..." << std::endl;
@@ -19,24 +31,49 @@ void signal_handler(int signum) {
 }
 
 int main(int argc, char** argv) {
-    // 1. Register Signal Handler
+    // Register Signal Handler
     std::signal(SIGINT, signal_handler);
 
     std::cout << "[CCM Code] Initializing EdgeVision System..." << std::endl;
 
-    // 2. Argument Parsing
+    // Argument Parsing
+    std::string config_path = "configs/zones.yaml"; // Default
     bool test_mode = false;
-    if (argc > 1 && std::string(argv[1]) == "--test") {
-        test_mode = true;
-        std::cout << "[System] TEST MODE ENABLED." << std::endl;
+    bool config_json = false;
+    bool config_string = false;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--test") {
+            test_mode = true;
+            std::cout << "[System] TEST MODE ENABLED." << std::endl;
+        } else if (arg == "--config" && i + 1 < argc) {
+            config_path = argv[++i]; // Consume next arg
+        } else if (arg == "--config_string") {
+            config_string = true; 
+        } else if (arg == "--config_json") {
+            config_json = true; 
+        }
     }
 
-    // 3. Load Configuration
-    CCM::AppConfig config = CCM::AppConfig::load("configs/zones.yaml");
-    
-    // 4. Initialize Modules
+    // Load Configuration
+    CCM::AppConfig config = CCM::AppConfig::load(config_path);
+    cv::FileStorage fs(config_path, cv::FileStorage::READ);
+    std::cout << "[System] Loading configuration from:  " << getAbsolutePath(config_path.c_str()) << std::endl;
+
+    if(config_string){
+        std::cout << "[Debug] Config Loaded:\n" << config.toString() << std::endl;
+        return 0;
+    }
+
+    if(config_json) {
+        std::cout << config.toJSON() << std::endl;
+        return 0;
+    }
+    // Initialize Modules
     CCM::Detector* detector = nullptr;
     if (!test_mode) {
+        // Use values from config (or defaults if missing)
         std::string model = config.model_path.empty() ? "models/yolov5s.onnx" : config.model_path;
         std::string classes = config.class_names.empty() ? "models/coco.names" : config.class_names;
         
@@ -52,7 +89,7 @@ int main(int argc, char** argv) {
     CCM::Tracker tracker(5, 50.0f); 
     CCM::OverlayRenderer renderer;
     
-    // 5. Initialize Camera
+    // Initialize Camera
     std::cout << "[Camera] Opening index " << config.camera.index << "..." << std::endl;
     cv::VideoCapture cap(config.camera.index); 
     
@@ -63,7 +100,7 @@ int main(int argc, char** argv) {
 
     // Apply Camera Settings
     if (config.camera.force_mjpg) {
-        std::cout << "[Camera] Forcing MJPEG compression (WSL Mode)" << std::endl;
+        std::cout << "[Camera] Forcing MJPEG compression (WSL/Linux Mode)" << std::endl;
         cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
     }
     cap.set(cv::CAP_PROP_FRAME_WIDTH, config.camera.width);
@@ -72,46 +109,56 @@ int main(int argc, char** argv) {
 
     cv::Mat frame;
     
-    // 6. Main Loop 
+    // Main Loop 
     while (g_running) {
         cap >> frame;
         if (frame.empty()) {
              std::cerr << "[Warning] Blank frame captured (Camera disconnected?)" << std::endl;
-             // In production, we might try to reconnect here. 
-             // For now, we break to trigger cleanup.
-             break;
+             continue; // Don't crash, just retry
         }
 
-        std::vector<CCM::Detection> detections;if (!test_mode && detector) {
-            detections = detector->detect(frame, config.confidence_threshold, config.nms_threshold);
-        }
-
-        // Convert detections to Rects for the tracker
-        std::vector<cv::Rect> detection_boxes;
-        for(const auto& d : detections) detection_boxes.push_back(d.box);
+        std::vector<CCM::Detection> detections;
         
-        // Run Tracker Update
-        // Note: Currently we aren't visualizing the IDs in renderer.draw(), 
-        // but the logic is now running and ready for future features.
-        auto tracked_objects = tracker.update(detection_boxes); 
-        // -------------------------
+        if (!test_mode && detector) {
+            // Pass the full config to the detector so it knows pixel_scale/swap_rb
+            detections = detector->detect(frame, config);
+
+            if (config.debug.enabled) {
+                std::cout << "[Main] detections this frame: " << detections.size() << std::endl;
+                for (const auto& d : detections) {
+                    std::cout << "  - class=" << d.className
+                            << " conf=" << d.confidence
+                            << " box=" << d.box << std::endl;
+                }
+            }
+        }
+        // Test Mode Simulation
+        else if (test_mode) {
+             static int x_pos = 0;
+             x_pos = (x_pos + 5) % config.camera.width;
+             CCM::Detection det;
+             det.class_id = 0;
+             det.className = "person (sim)";
+             det.confidence = 0.99f;
+             det.box = cv::Rect(x_pos, 100, 100, 200);
+             detections.push_back(det);
+        }
+
+        // Tracker & Renderer
+        std::vector<cv::Rect> boxes;
+        for(const auto& d : detections) boxes.push_back(d.box);
+        auto tracked_objects = tracker.update(boxes); 
 
         renderer.draw(frame, detections, config);
 
-        if (test_mode) {
-            cv::putText(frame, "TEST MODE", {20, 30}, cv::FONT_HERSHEY_SIMPLEX, 0.8, {0,255,255}, 2);
-        }
-
         cv::imshow("CCM EdgeVision | Professional Edition", frame);
         
-        // Check for ESC key (local exit)
         if (cv::waitKey(1) == 27) {
             std::cout << "[System] ESC pressed. Exiting..." << std::endl;
             g_running = false;
         }
     }
 
-    // 7. Graceful Cleanup
     if (detector) delete detector;
     cap.release();
     cv::destroyAllWindows();

@@ -3,6 +3,19 @@
 namespace CCM {
 
 void OverlayRenderer::draw(cv::Mat& frame, const std::vector<Detection>& detections, const AppConfig& config) {
+    
+    // TEMP: raw visualization of everything that Detector spits out.
+    for (const auto& det : detections) {
+        cv::rectangle(frame, det.box, cv::Scalar(0, 255, 255), 2);
+        cv::putText(frame,
+                    det.className + " " + cv::format("%.2f", det.confidence),
+                    det.box.tl() + cv::Point(0, -5),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    cv::Scalar(0, 255, 255),
+                    1);
+    }
+    
     // 1. Draw Zones (The "Customization Package" feature)
     for (const auto& zone : config.zones) {
         cv::rectangle(frame, zone.rect, zone.color, 2);

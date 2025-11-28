@@ -50,3 +50,4 @@ models/*
 !models/.gitkeep
 .venv/
 venv/
+/dashboard/venv

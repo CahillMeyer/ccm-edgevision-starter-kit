@@ -3,6 +3,7 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 #include <string>
+#include "config.hpp"
 
 namespace CCM {
 
@@ -18,7 +19,7 @@ public:
     Detector(const std::string& model_path, const std::string& classes_path);
     
     // Main inference method
-    std::vector<Detection> detect(const cv::Mat& frame, float conf_threshold = 0.5f, float nms_threshold = 0.4f);
+    std::vector<Detection> detect(const cv::Mat& frame, const AppConfig& config);
 
 private:
     cv::dnn::Net net_;
